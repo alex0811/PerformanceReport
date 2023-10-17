@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Report</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="./dist/uPlot.min.css" />
+  </head>
+  <body>
+    <script src="./dist/uPlot.iife.js"></script>
+
+    <p>选择文件、或者将文件拖入页面</p>
+    <input type="file" id="fileInput" accept=".json" />
+    <pre id="output"></pre>
+    <div id="uChart"></div>
+
+    <script>
+      const fileInput = document.getElementById("fileInput");
+      const output = document.getElementById("output");
+      const chart = document.getElementById("uChart");
+
+      // 选择文件
+      fileInput.addEventListener("change", (event) => {
+        const selectedFile = event.target.files[0];
+
+        if (selectedFile) {
+          const reader = new FileReader();
+
+          reader.onload = function (event) {
+            const fileContent = event.target.result;
+            try {
+              const jsonData = JSON.parse(fileContent);
+              reloadChart(jsonData, chart);
+            } catch (error) {
+              output.textContent = "无法解析JSON文件：" + error.message;
+            }
+          };
+
+          reader.readAsText(selectedFile);
+        }
+      });
+
+      // 处理文件拖拽
+      document.addEventListener("dragover", (e) => {
+        e.preventDefault();
+      });
+      document.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files[0];
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const fileContent = event.target.result;
+          try {
+            const jsonData = JSON.parse(fileContent);
+            reloadChart(jsonData, chart);
+          } catch (error) {
+            output.textContent = "无法解析JSON文件：" + error.message;
+          }
+        };
+        reader.readAsText(file);
+      });
+
+      /**
+       * 将数据显示在表格中
+       * @param {Map} data
+       * @param {uPlot} chart
+       */
+      function reloadChart(dic, chart) {
+        // 数据加工，确保第一个元素是时间戳数组
+        const timeKey = "timestamp";
+        const data = [];
+        for (const key in dic) {
+          if (key == timeKey) {
+            data.unshift(dic[key]);
+          } else {
+            data.push(dic[key]);
+          }
+        }
+
+        let longDateHourMin = uPlot.fmtDate("{YYYY}-{MM}-{DD} {h}:{mm}{aa}");
+        const valuesInSerie = (u, sidx, idx) => {
+          if (idx == null) return { Time: "--", Value: "--" };
+
+          let date = new Date(data[0][idx] * 1e3);
+          return {
+            Time: longDateHourMin(date),
+            Value: data[sidx][idx],
+          };
+        };
+
+        // 各个维度数据
+        let series = [{}];
+        let colorIndex = 0;
+        for (const key in dic) {
+          // 时间戳信息不处理
+          if (key == timeKey) {
+            continue;
+          }
+
+          const [stroke, fill] = generateColor(colorIndex);
+          colorIndex++;
+
+          series.push({
+            label: key,
+            values: valuesInSerie,
+            stroke: stroke,
+            fill: fill,
+          });
+        }
+
+        const opts = {
+          title: "Performance Report",
+          width: 1000,
+          height: 600,
+
+          cursor: {
+            dataIdx: (self, seriesIdx, hoveredIdx, cursorXVal) => {
+              let xValues = self.data[0];
+              let yValues = self.data[seriesIdx];
+
+              // todo: only scan in-view idices
+
+              if (yValues[hoveredIdx] == null) {
+                let nonNullLft = null,
+                  nonNullRgt = null,
+                  i;
+
+                i = hoveredIdx;
+                while (nonNullLft == null && i-- > 0) {
+                  if (yValues[i] != null) nonNullLft = i;
+                }
+
+                i = hoveredIdx;
+                while (nonNullRgt == null && i++ < yValues.length) {
+                  if (yValues[i] != null) nonNullRgt = i;
+                }
+
+                let rgtVal =
+                  nonNullRgt == null ? Infinity : xValues[nonNullRgt];
+                let lftVal =
+                  nonNullLft == null ? -Infinity : xValues[nonNullLft];
+
+                let lftDelta = cursorXVal - lftVal;
+                let rgtDelta = rgtVal - cursorXVal;
+
+                hoveredIdx = lftDelta <= rgtDelta ? nonNullLft : nonNullRgt;
+              }
+
+              return hoveredIdx;
+            },
+          },
+          series: series,
+        };
+        chart.innerHTML = "";
+        u = new uPlot(opts, data, chart);
+      }
+
+      /**
+       * 生成颜色，最多 10 预设颜色，超过后会出现重复颜色
+       * @param {int} index
+       * @returns 颜色信息
+       */
+      function generateColor(index) {
+        const colors = [
+          ["red", "rgba(255, 0, 0, 0.05)"],
+          ["blue", "rgba(0, 0, 255, 0.05)"],
+          ["green", "rgba(0, 128, 0, 0.05)"],
+          ["yellow", "rgba(255, 255, 0, 0.05)"],
+          ["purple", "rgba(128, 0, 128, 0.05)"],
+          ["orange", "rgba(255, 165, 0, 0.05)"],
+          ["pink", "rgba(255, 192, 203, 0.05)"],
+          ["brown", "rgba(165, 42, 42, 0.05)"],
+          ["gray", "rgba(128, 128, 128, 0.05)"],
+          ["cyan", "rgba(0, 255, 255, 0.05)"],
+        ];
+
+        return colors[index % colors.length];
+      }
+    </script>
+
+    <!-- <script>
+      const hoverProximityPx = 30;
+
+      const opts2 = {
+        title: "Nearest Non-Null2",
+        width: 1000,
+        height: 600,
+        cursor: {
+          dataIdx: (self, seriesIdx, hoveredIdx, cursorXVal) => {
+            let seriesData = self.data[seriesIdx];
+
+            if (seriesData[hoveredIdx] == null) {
+              let nonNullLft = null,
+                nonNullRgt = null,
+                i;
+
+              i = hoveredIdx;
+              while (nonNullLft == null && i-- > 0) {
+                if (seriesData[i] != null) nonNullLft = i;
+              }
+
+              i = hoveredIdx;
+              while (nonNullRgt == null && i++ < seriesData.length) {
+                if (seriesData[i] != null) nonNullRgt = i;
+              }
+
+              let xVals = self.data[0];
+
+              let curPos = self.valToPos(cursorXVal, "x");
+              let rgtPos =
+                nonNullRgt == null
+                  ? Infinity
+                  : self.valToPos(xVals[nonNullRgt], "x");
+              let lftPos =
+                nonNullLft == null
+                  ? -Infinity
+                  : self.valToPos(xVals[nonNullLft], "x");
+
+              let lftDelta = curPos - lftPos;
+              let rgtDelta = rgtPos - curPos;
+
+              if (lftDelta <= rgtDelta) {
+                if (lftDelta <= hoverProximityPx) hoveredIdx = nonNullLft;
+              } else {
+                if (rgtDelta <= hoverProximityPx) hoveredIdx = nonNullRgt;
+              }
+            }
+
+            return hoveredIdx;
+          },
+        },
+        hooks: {
+          init: [
+            (u) => {
+              /*
+							let els = {
+								hz: null,
+								vt: null,
+							};
+
+							let hz = els.hz = document.createElement('div');
+							hz.style.height = '100%';
+							hz.style.width = '5px';
+							hz.style.background = 'rgba(255,0,0,0.3)';
+							hz.style.position = 'absolute';
+							hz.style.transformOrigin = '0 0';
+							u.over.appendChild(hz);
+
+							let vt = els.vt = document.createElement('div');
+							vt.style.width = '100%';
+							vt.style.height = '5px';
+							vt.style.background = 'rgba(255,0,0,0.3)';
+							vt.style.position = 'absolute';
+							vt.style.transformOrigin = '0 0';
+							u.over.appendChild(vt);
+
+							u.els = els;
+						*/
+            },
+          ],
+          setLegend: [
+            (u) => {
+              /*
+							let idx = u.cursor.idxs[3];
+							if (idx != null) {
+								let x = u.valToPos(u.data[0][idx], 'x');
+								let y = u.valToPos(u.data[3][idx], 'y');
+
+								u.els.hz.style.translate = `${x}px 0`;
+								u.els.vt.style.translate = `0 ${y}px`;
+							}
+						*/
+            },
+          ],
+        },
+        scales: {
+          x: {
+            time: false,
+          },
+        },
+        series: [
+          {},
+          {
+            stroke: "red",
+            spanGaps: true,
+          },
+          {
+            stroke: "blue",
+            spanGaps: true,
+          },
+          {
+            stroke: "green",
+            spanGaps: true,
+          },
+          {
+            stroke: "orange",
+            spanGaps: true,
+          },
+        ],
+      };
+
+      const tables = [
+        [
+          null,
+          [
+            30,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            30,
+            null,
+            null,
+            null,
+            null,
+            null,
+            30,
+          ],
+        ],
+        [
+          null,
+          [
+            5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+            5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+          ],
+        ],
+        [
+          null,
+          [
+            18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+            18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+          ],
+        ],
+        [
+          null,
+          [
+            25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
+            25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
+          ],
+        ],
+      ];
+
+      let xRange = 100;
+
+      tables.forEach((t) => {
+        t[0] = t[1].map((v, i) => (i / t[1].length) * xRange);
+      });
+
+      const data2 = uPlot.join(tables);
+
+      let u2 = new uPlot(opts2, data2, document.body);
+    </script> -->
+  </body>
+</html>
